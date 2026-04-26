@@ -1,0 +1,13 @@
+apiVersion: ml.jay.dev/v1
+kind: TrainingJob
+metadata:
+  name: sample-trainingjob
+  namespace: default
+spec:
+  image: busybox:latest
+  command:
+    - sh
+    - -c
+  args:
+    - 'echo "Training started"; sleep 5; echo "Training complete"'
+  maxRetries: 2

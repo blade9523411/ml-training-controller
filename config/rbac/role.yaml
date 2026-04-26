@@ -1,0 +1,44 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ml.jay.dev
+  resources:
+  - trainingjobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ml.jay.dev
+  resources:
+  - trainingjobs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ml.jay.dev
+  resources:
+  - trainingjobs/status
+  verbs:
+  - get
+  - patch
+  - update
