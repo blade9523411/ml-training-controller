@@ -1,0 +1,11 @@
+apiVersion: ml.jay.dev/v1
+kind: TrainingJob
+metadata:
+  name: fail-trainingjob
+  namespace: default
+spec:
+  image: trainer:dev
+  args:
+    - --epochs=3
+    - --fail
+  maxRetries: 0

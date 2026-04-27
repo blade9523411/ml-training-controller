@@ -1,0 +1,12 @@
+apiVersion: ml.jay.dev/v1
+kind: TrainingJob
+metadata:
+  name: checkpoint-trainingjob
+  namespace: default
+spec:
+  image: trainer:dev
+  args:
+    - --epochs=10
+    - --fail-at-epoch=5
+  checkpointPath: /checkpoints
+  maxRetries: 1

@@ -178,8 +178,9 @@ func main() {
 	}
 
 	if err := (&controller.TrainingJobReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("trainingjob-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to set up TrainingJob controller")
 		os.Exit(1)

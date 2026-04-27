@@ -53,6 +53,12 @@ type TrainingJobSpec struct {
 	// +optional
 	// +kubebuilder:default=0
 	MaxRetries int32 `json:"maxRetries,omitempty"`
+
+	// CheckpointPath is the directory inside the container where checkpoints are written.
+	// When set, the controller provisions a PVC and mounts it here so all retry attempts
+	// share the same checkpoint data.
+	// +optional
+	CheckpointPath string `json:"checkpointPath,omitempty"`
 }
 
 // TrainingJobStatus defines the observed state of TrainingJob.
@@ -80,6 +86,11 @@ type TrainingJobStatus struct {
 	// Message provides a human-readable status message.
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// LastCheckpoint is the path of the most recently written checkpoint file.
+	// Set when a retry is triggered, indicating the next attempt can resume from here.
+	// +optional
+	LastCheckpoint string `json:"lastCheckpoint,omitempty"`
 }
 
 // +kubebuilder:object:root=true
