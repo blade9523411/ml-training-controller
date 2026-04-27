@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-logr/logr"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -72,7 +71,7 @@ func (r *TrainingJobReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if tj.Spec.CheckpointPath != "" {
-		if err := r.ensureCheckpointPVC(ctx, &tj, logger); err != nil {
+		if err := r.ensureCheckpointPVC(ctx, &tj); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -100,7 +99,7 @@ func (r *TrainingJobReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if desiredPhase == mlv1.PhaseFailed {
 		if tj.Status.Retries < tj.Spec.MaxRetries {
-			return r.startRetry(ctx, &tj, logger)
+			return r.startRetry(ctx, &tj)
 		}
 		logger.Info("Retries exhausted, marking Failed",
 			"retries", tj.Status.Retries, "maxRetries", tj.Spec.MaxRetries)
@@ -151,7 +150,8 @@ func (r *TrainingJobReconciler) emitPhaseEvent(tj *mlv1.TrainingJob, oldPhase, n
 // startRetry creates the next child Job and advances the retry counter in status.
 // Idempotent: if the next Job already exists (prior status patch failed), creation
 // is skipped and only the status patch is re-attempted.
-func (r *TrainingJobReconciler) startRetry(ctx context.Context, tj *mlv1.TrainingJob, logger logr.Logger) (ctrl.Result, error) {
+func (r *TrainingJobReconciler) startRetry(ctx context.Context, tj *mlv1.TrainingJob) {
+	logger := log.FromContext(ctx)
 	nextAttempt := tj.Status.Retries + 1
 	nextJobName := jobNameForAttempt(tj.Name, nextAttempt)
 
@@ -189,7 +189,8 @@ func (r *TrainingJobReconciler) startRetry(ctx context.Context, tj *mlv1.Trainin
 
 // ensureCheckpointPVC creates the PVC backing checkpoint storage if it does not
 // exist. Owner reference ensures the PVC is deleted when the TrainingJob is deleted.
-func (r *TrainingJobReconciler) ensureCheckpointPVC(ctx context.Context, tj *mlv1.TrainingJob, logger logr.Logger) error {
+func (r *TrainingJobReconciler) ensureCheckpointPVC(ctx context.Context, tj *mlv1.TrainingJob) error {
+	logger := log.FromContext(ctx)
 	pvcName := tj.Name + "-checkpoint"
 	var pvc corev1.PersistentVolumeClaim
 	err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: tj.Namespace}, &pvc)
