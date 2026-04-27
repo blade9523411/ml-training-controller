@@ -268,7 +268,27 @@ ml-training-controller/
 - **`ImagePullPolicy` is hardcoded to `IfNotPresent`.** Suitable for kind; would need a spec field for production use.
 
 ---
+## Current Validation
+- The controller has been validated on a local kind cluster across success, failure, retry, concurrency, and lifecycle scenarios.
 
+- Successful execution:
+10/10 TrainingJobs completed with a single child Job (run-0) and reached Succeeded.
+Failure + retry handling:
+10/10 failing TrainingJobs respected maxRetries = 2, producing exactly three attempts (run-0 → run-2) and terminating with phase = Failed and retries = 2.
+- Concurrent workloads:
+5 TrainingJobs executed simultaneously with no race conditions or duplicate Job creation; all reached Succeeded.
+- Aggregate stress test:
+25 TrainingJobs (10 success, 10 fail, 5 concurrent) resulted in 45+ Kubernetes Job executions with all resources converging to terminal states.
+A +1 Job discrepancy was observed, indicating a minor idempotency edge case under rapid reconciliation.
+- Idempotency:
+Re-applying identical manifests did not produce duplicate Jobs in standard cases.
+Controller restart recovery:
+Restarting the controller during execution did not trigger duplicate Jobs; existing Jobs were re-observed and state converged correctly.
+- Ownership and cleanup:
+Deleting a TrainingJob removed all owned Jobs via owner references.
+
+
+---
 ## Stretch Goals
 
 - Distributed training via multi-worker Jobs or a dedicated framework (Kubeflow Training Operator pattern)
@@ -286,3 +306,5 @@ ml-training-controller/
 ## License
 
 Copyright 2026. Licensed under the Apache License, Version 2.0.
+
+

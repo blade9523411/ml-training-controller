@@ -1,0 +1,9 @@
+apiVersion: ml.jay.dev/v1
+kind: TrainingJob
+metadata:
+  name: test-restart
+spec:
+  image: busybox
+  command: ["sh", "-c"]
+  args: ["echo starting; sleep 30; echo done"]
+  maxRetries: 1
