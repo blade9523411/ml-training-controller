@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-logr/logr"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,13 +53,14 @@ func (r *TrainingJobReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Nothing to do once we've reached a terminal state.
-	if tj.Status.Phase == mlv1.PhaseSucceeded || tj.Status.Phase == mlv1.PhaseFailed {
+	if isTerminal(tj.Status.Phase) {
 		return ctrl.Result{}, nil
 	}
 
-	jobName := jobNameForAttempt(tj.Name, 0)
+	// The current Job name is derived from the retry count: run-0, run-1, run-2, ...
+	jobName := jobNameForAttempt(tj.Name, tj.Status.Retries)
 
-	// Ensure the child Job exists; create it if missing.
+	// Ensure the current child Job exists; create it if missing.
 	var childJob batchv1.Job
 	err := r.Get(ctx, client.ObjectKey{Name: jobName, Namespace: tj.Namespace}, &childJob)
 	if apierrors.IsNotFound(err) {
@@ -70,23 +72,118 @@ func (r *TrainingJobReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, fmt.Errorf("creating Job %s: %w", jobName, err)
 		}
 		logger.Info("Created child Job", "job", jobName)
+		// Status is synced on the next reconcile, which Owns() triggers automatically.
+		return ctrl.Result{}, nil
 	} else if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting Job %s: %w", jobName, err)
 	}
 
-	// Set initial status once the Job name is known. Subsequent phases will
-	// overwrite Phase as the Job progresses.
-	if tj.Status.JobName == "" {
-		original := tj.DeepCopy()
-		tj.Status.JobName = jobName
-		tj.Status.Phase = mlv1.PhasePending
-		tj.Status.Message = "Child Job created, waiting to start"
+	// Derive desired state from the current Job.
+	desiredPhase, desiredMessage := jobPhase(&childJob)
+
+	// If the current Job failed, decide whether to retry or give up.
+	if desiredPhase == mlv1.PhaseFailed {
+		if tj.Status.Retries < tj.Spec.MaxRetries {
+			return r.startRetry(ctx, &tj, logger)
+		}
+		// Retries exhausted — fall through to set terminal Failed status below.
+		logger.Info("No retries remaining, marking Failed",
+			"retries", tj.Status.Retries, "maxRetries", tj.Spec.MaxRetries)
+	}
+
+	// Sync TrainingJob status from the child Job's observed state.
+	now := metav1.Now()
+	original := tj.DeepCopy()
+
+	tj.Status.JobName = jobName
+	tj.Status.Phase = desiredPhase
+	tj.Status.Message = desiredMessage
+	if tj.Status.StartTime == nil {
+		tj.Status.StartTime = &now
+	}
+	if isTerminal(desiredPhase) && tj.Status.CompletionTime == nil {
+		tj.Status.CompletionTime = &now
+	}
+
+	if statusChanged(original, &tj) {
+		logger.Info("Updating TrainingJob status", "phase", desiredPhase)
 		if err := r.Status().Patch(ctx, &tj, client.MergeFrom(original)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("patching status: %w", err)
 		}
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// startRetry creates the next child Job and advances the retry counter in status.
+// It is idempotent: if the next Job already exists (e.g. a previous status patch
+// failed), it skips creation and re-attempts the status patch.
+func (r *TrainingJobReconciler) startRetry(ctx context.Context, tj *mlv1.TrainingJob, logger logr.Logger) (ctrl.Result, error) {
+	nextAttempt := tj.Status.Retries + 1
+	nextJobName := jobNameForAttempt(tj.Name, nextAttempt)
+
+	var existing batchv1.Job
+	err := r.Get(ctx, client.ObjectKey{Name: nextJobName, Namespace: tj.Namespace}, &existing)
+	if apierrors.IsNotFound(err) {
+		job := buildJob(tj, nextJobName)
+		if err := ctrl.SetControllerReference(tj, job, r.Scheme); err != nil {
+			return ctrl.Result{}, fmt.Errorf("setting owner reference for retry Job: %w", err)
+		}
+		if err := r.Create(ctx, job); err != nil {
+			return ctrl.Result{}, fmt.Errorf("creating retry Job %s: %w", nextJobName, err)
+		}
+		logger.Info("Created retry Job", "job", nextJobName, "attempt", nextAttempt)
+	} else if err != nil {
+		return ctrl.Result{}, fmt.Errorf("checking for retry Job %s: %w", nextJobName, err)
+	}
+
+	original := tj.DeepCopy()
+	tj.Status.Retries = nextAttempt
+	tj.Status.JobName = nextJobName
+	tj.Status.Phase = mlv1.PhaseRetrying
+	tj.Status.Message = fmt.Sprintf("Attempt %d failed, retrying (%d/%d)", nextAttempt-1, nextAttempt, tj.Spec.MaxRetries)
+	if err := r.Status().Patch(ctx, tj, client.MergeFrom(original)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("patching status for retry: %w", err)
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// jobPhase derives the TrainingJob phase and a human-readable message from the
+// observed state of the child Kubernetes Job.
+func jobPhase(job *batchv1.Job) (mlv1.TrainingJobPhase, string) {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
+			return mlv1.PhaseSucceeded, "Job completed successfully"
+		}
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			msg := c.Message
+			if msg == "" {
+				msg = "Job failed"
+			}
+			return mlv1.PhaseFailed, msg
+		}
+	}
+	if job.Status.Active > 0 {
+		return mlv1.PhaseRunning, "Job is running"
+	}
+	return mlv1.PhasePending, "Job created, waiting to start"
+}
+
+// isTerminal reports whether phase is a terminal state the controller stops acting on.
+func isTerminal(phase mlv1.TrainingJobPhase) bool {
+	return phase == mlv1.PhaseSucceeded || phase == mlv1.PhaseFailed
+}
+
+// statusChanged reports whether any observable status field has changed between
+// old and new, to avoid unnecessary API calls.
+func statusChanged(old, new *mlv1.TrainingJob) bool {
+	o, n := old.Status, new.Status
+	return o.Phase != n.Phase ||
+		o.JobName != n.JobName ||
+		o.Message != n.Message ||
+		(o.StartTime == nil) != (n.StartTime == nil) ||
+		(o.CompletionTime == nil) != (n.CompletionTime == nil)
 }
 
 // jobNameForAttempt returns a deterministic child Job name for a given attempt number.
@@ -115,11 +212,12 @@ func buildJob(tj *mlv1.TrainingJob, jobName string) *batchv1.Job {
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:    "trainer",
-							Image:   tj.Spec.Image,
-							Command: tj.Spec.Command,
-							Args:    tj.Spec.Args,
-							Env:     tj.Spec.Env,
+							Name:            "trainer",
+							Image:           tj.Spec.Image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Command:         tj.Spec.Command,
+							Args:            tj.Spec.Args,
+							Env:             tj.Spec.Env,
 						},
 					},
 				},
