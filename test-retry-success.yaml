@@ -1,0 +1,9 @@
+apiVersion: ml.jay.dev/v1
+kind: TrainingJob
+metadata:
+  name: test-retry-success
+spec:
+  image: trainer:dev
+  command: ["python", "/app/train.py"]
+  args: ["--fail-once"]
+  maxRetries: 2

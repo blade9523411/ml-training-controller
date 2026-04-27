@@ -1,0 +1,9 @@
+apiVersion: ml.jay.dev/v1
+kind: TrainingJob
+metadata:
+  name: test-success
+spec:
+  image: busybox
+  command: ["sh", "-c"]
+  args: ["echo training started; sleep 3; echo training complete"]
+  maxRetries: 1

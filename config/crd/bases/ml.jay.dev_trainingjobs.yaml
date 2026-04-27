@@ -57,6 +57,12 @@ spec:
                 items:
                   type: string
                 type: array
+              checkpointPath:
+                description: |-
+                  CheckpointPath is the directory inside the container where checkpoints are written.
+                  When set, the controller provisions a PVC and mounts it here so all retry attempts
+                  share the same checkpoint data.
+                type: string
               command:
                 description: Command overrides the container entrypoint.
                 items:
@@ -241,6 +247,11 @@ spec:
                 type: string
               jobName:
                 description: JobName is the name of the active child Kubernetes Job.
+                type: string
+              lastCheckpoint:
+                description: |-
+                  LastCheckpoint is the path of the most recently written checkpoint file.
+                  Set when a retry is triggered, indicating the next attempt can resume from here.
                 type: string
               message:
                 description: Message provides a human-readable status message.

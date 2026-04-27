@@ -1,0 +1,9 @@
+apiVersion: ml.jay.dev/v1
+kind: TrainingJob
+metadata:
+  name: test-fail
+spec:
+  image: busybox
+  command: ["sh", "-c"]
+  args: ["echo failing intentionally; exit 1"]
+  maxRetries: 2

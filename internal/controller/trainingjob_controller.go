@@ -258,6 +258,7 @@ func statusChanged(old, new *mlv1.TrainingJob) bool {
 	o, n := old.Status, new.Status
 	return o.Phase != n.Phase ||
 		o.JobName != n.JobName ||
+		o.Retries != n.Retries ||
 		o.Message != n.Message ||
 		o.LastCheckpoint != n.LastCheckpoint ||
 		(o.StartTime == nil) != (n.StartTime == nil) ||
